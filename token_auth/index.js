@@ -1,137 +1,88 @@
-const uuid = require('uuid');
+const request = require('request');
 const express = require('express');
-const onFinished = require('on-finished');
-const bodyParser = require('body-parser');
+const JSONparse = require('body-parser');
 const path = require('path');
 const port = 3000;
-const fs = require('fs');
+require('dotenv-expand').expand(require('dotenv').config());
 
 const app = express();
-app.use(bodyParser.json());
-app.use(bodyParser.urlencoded({ extended: true }));
+app.use(JSONparse.json());
+app.use(JSONparse.urlencoded({ extended: true }));
 
-const SESSION_KEY = 'Authorization';
 
-class Session {
-    #sessions = {}
+app.get('/', (request, response) => {
+    if (request.username) {
+        return response.json({
+            username: request.username,
+            logout: 'http://localhost:3000/logout',
+        });
+    }
+    response.sendFile(path.join(__dirname + '/index.html'));
+});
 
-    constructor() {
-        try {
-            this.#sessions = fs.readFileSync('./sessions.json', 'utf8');
-            this.#sessions = JSON.parse(this.#sessions.trim());
+app.post('/api/login', (request, response) => {
+    const { login, password } = request.body;
+    const getAccessToken = {
+        method: 'POST',
+        url: `https://${process.env.DOMAIN}/oauth/token`,
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        form: {
+            grant_type: 'password',
+            audience: process.env.AUDIENCE,
+            client_id: process.env.CLIENT_ID,
+            client_secret: process.env.CLIENT_SECRET,
+            username: login,
+            password: password,
+            scope: 'offline_access',
+        },
+    };
 
-            console.log(this.#sessions);
-        } catch(e) {
-            this.#sessions = {};
+    request(getAccessToken, (error, response, body) => {
+        if (error) {
+            response.status(401).send();
+            return;
         }
-    }
 
-    #storeSessions() {
-        fs.writeFileSync('./sessions.json', JSON.stringify(this.#sessions), 'utf-8');
-    }
+        const status = response.statusCode;
 
-    set(key, value) {
-        if (!value) {
-            value = {};
+        if (status >= 200 && status < 300) {
+            const response = JSON.parse(body);
+
+            process.env.USER_ACCESS_TOKEN = response.access_token;
+            console.log(response);
+            response.json({ token: response.access_token});
+            return;
         }
-        this.#sessions[key] = value;
-        this.#storeSessions();
-    }
 
-    get(key) {
-        return this.#sessions[key];
-    }
-
-    init(res) {
-        const sessionId = uuid.v4();
-        this.set(sessionId);
-
-        return sessionId;
-    }
-
-    destroy(req, res) {
-        const sessionId = req.sessionId;
-        delete this.#sessions[sessionId];
-        this.#storeSessions();
-    }
-}
-
-const sessions = new Session();
-
-app.use((req, res, next) => {
-    let currentSession = {};
-    let sessionId = req.get(SESSION_KEY);
-
-    if (sessionId) {
-        currentSession = sessions.get(sessionId);
-        if (!currentSession) {
-            currentSession = {};
-            sessionId = sessions.init(res);
-        }
-    } else {
-        sessionId = sessions.init(res);
-    }
-
-    req.session = currentSession;
-    req.sessionId = sessionId;
-
-    onFinished(req, () => {
-        const currentSession = req.session;
-        const sessionId = req.sessionId;
-        sessions.set(sessionId, currentSession);
+        response.status(status).send();
     });
-
-    next();
 });
 
-app.get('/', (req, res) => {
-    if (req.session.username) {
-        return res.json({
-            username: req.session.username,
-            logout: 'http://localhost:3000/logout'
-        })
-    }
-    res.sendFile(path.join(__dirname+'/index.html'));
-})
-
-app.get('/logout', (req, res) => {
-    sessions.destroy(req, res);
-    res.redirect('/');
+app.get('/logout', (request, response) => {
+    response.redirect('/');
 });
 
-const users = [
-    {
-        login: 'Login',
-        password: 'Password',
-        username: 'Username',
+
+
+const getAccessToken = {
+    method: 'POST',
+    url: `https://${process.env.DOMAIN}/oauth/token`,
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    form: {
+        client_id: process.env.CLIENT_ID,
+        client_secret: process.env.CLIENT_SECRET,
+        audience: process.env.AUDIENCE,
+        grant_type: 'client_credentials',
     },
-    {
-        login: 'Login1',
-        password: 'Password1',
-        username: 'Username1',
-    }
-]
+};
 
-app.post('/api/login', (req, res) => {
-    const { login, password } = req.body;
+request(getAccessToken, (error, response, body) => {
+    if (error) throw new Error(error);
 
-    const user = users.find((user) => {
-        if (user.login == login && user.password == password) {
-            return true;
-        }
-        return false
-    });
-
-    if (user) {
-        req.session.username = user.username;
-        req.session.login = user.login;
-
-        res.json({ token: req.sessionId });
-    }
-
-    res.status(401).send();
+    const resp = JSON.parse(body);
+    process.env.ACCESS_TOKEN = resp.access_token;
 });
 
 app.listen(port, () => {
-    console.log(`Example app listening on port ${port}`)
-})
+    console.log(`Example app listening on port ${port}`);
+});
