@@ -4,12 +4,43 @@ const JSONparse = require('body-parser');
 const path = require('path');
 const port = 3000;
 require('dotenv-expand').expand(require('dotenv').config());
+const axios = require('axios');
+const { auth } = require('express-oauth2-jwt-bearer');
 
 const app = express();
 app.use(JSONparse.json());
 app.use(JSONparse.urlencoded({ extended: true }));
 
+const checkJwt = auth({
+    audience: process.env.AUDIENCE,
+    issuerBaseURL: process.env.DOMAIN,
+});
 
+const setMiddleware = (req, res, next) => {
+    const auth_header = req.headers.authorization;
+    const access_token = auth_header ? auth_header.split(' ')[1] : null;
+    axios.get(`${process.env.DOMAIN}/userinfo/`, {
+        headers: {
+            'Authorization': `Bearer ${access_token}`,
+            'Content-Type': 'application/json',
+        },
+    }).then((response) => {
+        req.user = response.data;
+        next();
+    }).catch((error) => {
+        next();
+    });
+};
+
+app.get('/profile', checkJwt, setMiddleware, (req, res) => {
+    if (req.user) {
+        return res.json({
+            email: req.user.email,
+            logout: 'http://localhost:3000/logout'
+        });
+    }
+    return res.status(401).send('unauthorized');
+});
 app.get('/', (request, response) => {
     if (request.username) {
         return response.json({
