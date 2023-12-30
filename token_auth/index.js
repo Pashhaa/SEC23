@@ -16,6 +16,7 @@ const checkJwt = auth({
     issuerBaseURL: process.env.DOMAIN,
 });
 
+
 const setMiddleware = (req, res, next) => {
     const auth_header = req.headers.authorization;
     const access_token = auth_header ? auth_header.split(' ')[1] : null;
